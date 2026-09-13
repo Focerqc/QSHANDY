@@ -53,25 +53,35 @@ const OVERLAY_HEIGHT: f64 = 50.0;
 const OVERLAY_STREAM_WIDTH: f64 = 400.0;
 const OVERLAY_STREAM_HEIGHT: f64 = 120.0;
 
-const OVERLAY_CARDS_WIDTH: f64 = 660.0;
-const OVERLAY_CARDS_HEIGHT: f64 = 540.0;
-const OVERLAY_CARDS_RECORDING_HEIGHT: f64 = 590.0;
+const OVERLAY_SINGLE_CARD_WIDTH: f64 = 460.0;
+const OVERLAY_CARDS_WIDTH: f64 = 650.0;
+const OVERLAY_CARDS_HEIGHT: f64 = 300.0;
+const OVERLAY_CARDS_RECORDING_HEIGHT: f64 = 360.0;
 
 /// Overlay window size (logical) for a given UI state.
 fn overlay_dimensions(app_handle: &AppHandle, state: &str) -> (f64, f64) {
-    let has_cards = crate::card_manager::has_active_cards(app_handle);
-    if has_cards {
+    let card_count = if let Some(mgr) =
+        app_handle.try_state::<std::sync::Arc<crate::card_manager::CardManager>>()
+    {
+        mgr.card_count()
+    } else {
+        0
+    };
+    if card_count > 0 || state == "cards" {
+        let width = if card_count <= 1 {
+            OVERLAY_SINGLE_CARD_WIDTH
+        } else {
+            OVERLAY_CARDS_WIDTH
+        };
         if state == "streaming"
             || state == "recording"
             || state == "transcribing"
             || state == "processing"
         {
-            (OVERLAY_CARDS_WIDTH, OVERLAY_CARDS_RECORDING_HEIGHT)
+            (width, OVERLAY_CARDS_RECORDING_HEIGHT)
         } else {
-            (OVERLAY_CARDS_WIDTH, OVERLAY_CARDS_HEIGHT)
+            (width, OVERLAY_CARDS_HEIGHT)
         }
-    } else if state == "cards" {
-        (OVERLAY_CARDS_WIDTH, OVERLAY_CARDS_HEIGHT)
     } else if state == "streaming" {
         (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT)
     } else {
@@ -93,6 +103,8 @@ const OVERLAY_BOTTOM_OFFSET: f64 = 15.0;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 const OVERLAY_BOTTOM_OFFSET: f64 = 40.0;
 
+const OVERLAY_SIDE_OFFSET: f64 = 24.0;
+
 /// Configures the edge and offset of a GTK layer surface. gtk-layer-shell
 /// commits anchor and margin changes itself, including while the surface is
 /// mapped, so changing position does not require a manual hide/show cycle.
@@ -100,11 +112,29 @@ const OVERLAY_BOTTOM_OFFSET: f64 = 40.0;
 fn configure_layer_shell_position(gtk_window: &gtk::ApplicationWindow, position: OverlayPosition) {
     let (edge, opposite_edge, margin) = match position {
         OverlayPosition::Top => (Edge::Top, Edge::Bottom, OVERLAY_TOP_OFFSET),
-        OverlayPosition::Bottom => (Edge::Bottom, Edge::Top, OVERLAY_BOTTOM_OFFSET),
+        OverlayPosition::Bottom | OverlayPosition::BottomLeft | OverlayPosition::BottomRight => {
+            (Edge::Bottom, Edge::Top, OVERLAY_BOTTOM_OFFSET)
+        }
     };
 
     gtk_window.set_anchor(edge, true);
     gtk_window.set_anchor(opposite_edge, false);
+    match position {
+        OverlayPosition::BottomLeft => {
+            gtk_window.set_anchor(Edge::Left, true);
+            gtk_window.set_anchor(Edge::Right, false);
+            gtk_window.set_layer_shell_margin(Edge::Left, OVERLAY_SIDE_OFFSET.round() as i32);
+        }
+        OverlayPosition::BottomRight => {
+            gtk_window.set_anchor(Edge::Right, true);
+            gtk_window.set_anchor(Edge::Left, false);
+            gtk_window.set_layer_shell_margin(Edge::Right, OVERLAY_SIDE_OFFSET.round() as i32);
+        }
+        _ => {
+            gtk_window.set_anchor(Edge::Left, false);
+            gtk_window.set_anchor(Edge::Right, false);
+        }
+    }
     gtk_window.set_layer_shell_margin(edge, margin.round() as i32);
     gtk_window.set_layer_shell_margin(opposite_edge, 0);
 }
@@ -273,10 +303,16 @@ fn calculate_overlay_position(
 
     let settings = settings::get_settings(app_handle);
 
-    let x = monitor_x + (monitor_width - width) / 2.0;
+    let x = match settings.overlay_position {
+        OverlayPosition::BottomLeft => monitor_x + OVERLAY_SIDE_OFFSET,
+        OverlayPosition::BottomRight => monitor_x + monitor_width - width - OVERLAY_SIDE_OFFSET,
+        OverlayPosition::Top | OverlayPosition::Bottom => {
+            monitor_x + (monitor_width - width) / 2.0
+        }
+    };
     let y = match settings.overlay_position {
         OverlayPosition::Top => monitor_y + OVERLAY_TOP_OFFSET,
-        OverlayPosition::Bottom => {
+        OverlayPosition::Bottom | OverlayPosition::BottomLeft | OverlayPosition::BottomRight => {
             // work_area.position shares monitor.position's global coordinate
             // space, so no monitor offset is added.
             #[cfg(target_os = "macos")]
@@ -335,16 +371,27 @@ fn windows_overlay_bounds(
     let content_scale = scale * text_scale;
     let width = (logical_width * content_scale).round().max(1.0) as i32;
     let height = (logical_height * content_scale).round().max(1.0) as i32;
-    let x = (monitor_position.x as f64 + (monitor_size.width as f64 - width as f64) / 2.0).round()
-        as i32;
+    let margin_x = (OVERLAY_SIDE_OFFSET * scale).round() as i32;
+    let x = match overlay_position {
+        OverlayPosition::BottomLeft => monitor_position.x + margin_x,
+        OverlayPosition::BottomRight => {
+            monitor_position.x + monitor_size.width as i32 - width - margin_x
+        }
+        OverlayPosition::Top | OverlayPosition::Bottom => {
+            (monitor_position.x as f64 + (monitor_size.width as f64 - width as f64) / 2.0).round()
+                as i32
+        }
+    };
     let y = match overlay_position {
         OverlayPosition::Top => {
             (monitor_position.y as f64 + OVERLAY_TOP_OFFSET * scale).round() as i32
         }
-        OverlayPosition::Bottom => (monitor_position.y as f64 + monitor_size.height as f64
-            - height as f64
-            - OVERLAY_BOTTOM_OFFSET * scale)
-            .round() as i32,
+        OverlayPosition::Bottom | OverlayPosition::BottomLeft | OverlayPosition::BottomRight => {
+            (monitor_position.y as f64 + monitor_size.height as f64
+                - height as f64
+                - OVERLAY_BOTTOM_OFFSET * scale)
+                .round() as i32
+        }
     };
 
     (x, y, width, height)
@@ -661,30 +708,26 @@ pub fn resize_overlay_for_cards_change(app_handle: AppHandle, count: usize) -> R
     if let Some(mgr) = app_handle.try_state::<std::sync::Arc<crate::card_manager::CardManager>>() {
         mgr.set_card_count(count);
     }
-    // If cards reached 0 while recording is active, resize back down to recording size
-    if count == 0 {
-        if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
-            let handle = app_handle.clone();
-            let _ = app_handle.run_on_main_thread(move || {
-                #[cfg(target_os = "windows")]
-                {
-                    let is_streaming = WINDOWS_OVERLAY_IS_STREAMING.load(Ordering::Relaxed);
-                    let state = if is_streaming { "streaming" } else { "recording" };
-                    let (w, h) = overlay_dimensions(&handle, state);
-                    let _ = place_windows_overlay(&handle, &overlay_window, w, h);
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let (w, h) = (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT);
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let handle = app_handle.clone();
+        let _ = app_handle.run_on_main_thread(move || {
+            let is_streaming = WINDOWS_OVERLAY_IS_STREAMING.load(Ordering::Relaxed);
+            let state = if is_streaming { "streaming" } else { "recording" };
+            let (w, h) = overlay_dimensions(&handle, state);
+            #[cfg(target_os = "windows")]
+            {
+                let _ = place_windows_overlay(&handle, &overlay_window, w, h);
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = overlay_window
+                    .set_size(tauri::Size::Logical(tauri::LogicalSize { width: w, height: h }));
+                if let Some((x, y)) = calculate_overlay_position(&handle, w, h) {
                     let _ = overlay_window
-                        .set_size(tauri::Size::Logical(tauri::LogicalSize { width: w, height: h }));
-                    if let Some((x, y)) = calculate_overlay_position(&handle, w, h) {
-                        let _ = overlay_window
-                            .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
-                    }
+                        .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
                 }
-            });
-        }
+            }
+        });
     }
     Ok(())
 }
@@ -754,6 +797,12 @@ pub fn hide_recording_overlay(app_handle: &AppHandle) {
         let scheduled_at = OVERLAY_SHOW_GENERATION.load(Ordering::SeqCst);
         // Emit event to trigger fade-out animation
         let _ = overlay_window.emit("hide-overlay", ());
+
+        // If user has cards deck active on screen, keep window visible!
+        if crate::card_manager::has_active_cards(app_handle) {
+            return;
+        }
+
         // Hide the window after a short delay to allow animation to complete,
         // unless a newer session has shown the overlay again by then.
         let window_clone = overlay_window.clone();

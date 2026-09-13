@@ -46,7 +46,9 @@ const RecordingOverlay: React.FC = () => {
   const [session, setSession] = useState(0);
   // Overlay placement (top vs bottom of the screen). The Live panel grows downward
   // from a top overlay (oldest line under the pill) and upward from a bottom one.
-  const [position, setPosition] = useState<"top" | "bottom">("bottom");
+  const [position, setPosition] = useState<
+    "top" | "bottom" | "bottom_left" | "bottom_right"
+  >("bottom_left");
   // True once live text overflows the cap. A top overlay fades its top edge only
   // while overflowing, so the resting first line stays crisp flush under the pill.
   const [overflowing, setOverflowing] = useState(false);
@@ -59,7 +61,21 @@ const RecordingOverlay: React.FC = () => {
   const pinnedRef = useRef(true);
   const direction = getLanguageDirection(i18n.language);
 
+  // Active editing card tracking (dictate direct to card)
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const editingCardIdRef = useRef<string | null>(null);
+  editingCardIdRef.current = editingCardId;
+
+  // Active cursor position in card textarea
+  const [caretPosition, setCaretPosition] = useState<number | null>(null);
+  const caretPositionRef = useRef<number | null>(null);
+  caretPositionRef.current = caretPosition;
+
   const handleRemoveCard = (id: string) => {
+    if (editingCardId === id) {
+      setEditingCardId(null);
+      setCaretPosition(null);
+    }
     setCards((prev) => {
       const updated = prev.filter((c) => c.id !== id);
       if (updated.length === 0 && !isRecordingActive) {
@@ -75,6 +91,8 @@ const RecordingOverlay: React.FC = () => {
   };
 
   const handleClearAll = () => {
+    setEditingCardId(null);
+    setCaretPosition(null);
     setCards([]);
     if (!isRecordingActive) {
       setIsVisible(false);
@@ -94,9 +112,40 @@ const RecordingOverlay: React.FC = () => {
 
   const handleAttachScreenshot = (id: string, dataUrl: string, blob: Blob) => {
     setCards((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, screenshot: dataUrl, screenshotBlob: blob } : c,
-      ),
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const newImg = { id: crypto.randomUUID(), dataUrl, blob };
+        const existingImages =
+          c.images && c.images.length > 0
+            ? c.images
+            : c.screenshot
+              ? [{ id: "primary", dataUrl: c.screenshot, blob: c.screenshotBlob }]
+              : [];
+        const updatedImages = [...existingImages, newImg];
+        return {
+          ...c,
+          screenshot: updatedImages[0]?.dataUrl,
+          screenshotBlob: updatedImages[0]?.blob,
+          images: updatedImages,
+        };
+      }),
+    );
+  };
+
+  const handleUpdateCardImages = (
+    id: string,
+    images: Array<{ id: string; dataUrl: string; blob?: Blob }>,
+  ) => {
+    setCards((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        return {
+          ...c,
+          screenshot: images[0]?.dataUrl,
+          screenshotBlob: images[0]?.blob,
+          images,
+        };
+      }),
     );
   };
 
@@ -104,7 +153,12 @@ const RecordingOverlay: React.FC = () => {
     setCards((prev) =>
       prev.map((c) =>
         c.id === id
-          ? { ...c, screenshot: undefined, screenshotBlob: undefined }
+          ? {
+              ...c,
+              screenshot: undefined,
+              screenshotBlob: undefined,
+              images: [],
+            }
           : c,
       ),
     );
@@ -129,11 +183,19 @@ const RecordingOverlay: React.FC = () => {
     const syncCard = async () => {
       try {
         let rawBytes: number[] | null = null;
-        if (activeCard.screenshotBlob) {
-          const buf = await activeCard.screenshotBlob.arrayBuffer();
+        const primaryImg =
+          activeCard.images?.[0] ||
+          (activeCard.screenshot
+            ? {
+                dataUrl: activeCard.screenshot,
+                blob: activeCard.screenshotBlob,
+              }
+            : null);
+        if (primaryImg?.blob) {
+          const buf = await primaryImg.blob.arrayBuffer();
           rawBytes = Array.from(new Uint8Array(buf));
-        } else if (activeCard.screenshot) {
-          const res = await fetch(activeCard.screenshot);
+        } else if (primaryImg?.dataUrl) {
+          const res = await fetch(primaryImg.dataUrl);
           const buf = await res.arrayBuffer();
           rawBytes = Array.from(new Uint8Array(buf));
         }
@@ -156,8 +218,13 @@ const RecordingOverlay: React.FC = () => {
 
     const setupEventListeners = async () => {
       const unlistenShow = await listen("show-overlay", async (event) => {
-        const overlayState = event.payload as OverlayState;
-        setIsRecordingActive(true);
+        const overlayState = event.payload as OverlayState | "cards";
+        const isRec =
+          overlayState === "recording" ||
+          overlayState === "streaming" ||
+          overlayState === "transcribing" ||
+          overlayState === "processing";
+        setIsRecordingActive(isRec);
         if (overlayState === "recording" || overlayState === "streaming") {
           setCaptureReady(false);
           smoothedLevelsRef.current = Array(16).fill(0);
@@ -169,14 +236,30 @@ const RecordingOverlay: React.FC = () => {
         try {
           const settings = await commands.getAppSettings();
           if (settings.status === "ok") {
+            const raw = settings.data.overlay_position;
             setPosition(
-              settings.data.overlay_position === "top" ? "top" : "bottom",
+              raw === "top" || raw === "bottom" || raw === "bottom_right"
+                ? raw
+                : "bottom_left",
             );
           }
         } catch {
           // Keep previous
         }
-        setState(overlayState);
+        if (overlayState !== "cards") {
+          setState(overlayState);
+        } else if (cardsRef.current.length === 0) {
+          const newId = crypto.randomUUID();
+          setCards([
+            {
+              id: newId,
+              text: "",
+              timestamp: Date.now(),
+            },
+          ]);
+          setSelectedCardId(newId);
+          setEditingCardId(newId);
+        }
         if (overlayState === "streaming") {
           setPhase("listening");
           setWorkKind("transcribing");
@@ -213,6 +296,54 @@ const RecordingOverlay: React.FC = () => {
         if (!text || !text.trim()) return;
         const id = event.payload?.id || crypto.randomUUID();
         const timestamp = event.payload?.timestamp || Date.now();
+
+        // If a card is actively being edited, insert speech directly where the cursor is!
+        const currentEditingId = editingCardIdRef.current;
+        if (
+          currentEditingId &&
+          cardsRef.current.some((c) => c.id === currentEditingId)
+        ) {
+          let nextCaret = 0;
+          setCards((prev) =>
+            prev.map((c) => {
+              if (c.id === currentEditingId) {
+                const trimmed = text.trim();
+                const pos = caretPositionRef.current;
+
+                if (pos !== null && pos >= 0 && pos <= c.text.length) {
+                  // Determine smart spacing before and after the insertion point
+                  const charBefore = pos > 0 ? c.text[pos - 1] : "";
+                  const charAfter = pos < c.text.length ? c.text[pos] : "";
+
+                  const needLeadingSpace =
+                    charBefore && !/\s/.test(charBefore);
+                  const needTrailingSpace =
+                    charAfter && !/\s/.test(charAfter);
+
+                  const insertion = `${needLeadingSpace ? " " : ""}${trimmed}${needTrailingSpace ? " " : ""}`;
+                  const newText =
+                    c.text.slice(0, pos) + insertion + c.text.slice(pos);
+
+                  nextCaret = pos + insertion.length;
+                  return { ...c, text: newText, timestamp: Date.now() };
+                } else {
+                  // Fallback: append to end
+                  const newText = c.text.trim()
+                    ? `${c.text.trim()} ${trimmed}`
+                    : trimmed;
+                  nextCaret = newText.length;
+                  return { ...c, text: newText, timestamp: Date.now() };
+                }
+              }
+              return c;
+            }),
+          );
+          setCaretPosition(nextCaret);
+          setSelectedCardId(currentEditingId);
+          setEditingCardId(null);
+          setIsVisible(true);
+          return;
+        }
 
         setCards((prev) => {
           // Deduplicate by ID
@@ -380,22 +511,115 @@ const RecordingOverlay: React.FC = () => {
 
   // dot (left) | waveform (center) | timer + cancel (right) — same structure for
   // pill & panel, so the Live morph is a pure width change.
+  // dot (left) | waveform (center) | timer + cancel (right) — same structure for
+  // pill & panel, so the Live morph is a pure width change.
+  const isAppending = Boolean(editingCardId);
   const listeningRow = (showTimer: boolean, showCancel: boolean) => (
     <div className="sbase">
       <div className="sbase-l">
         <button
-          className="sdot-btn"
+          className={`sdot-btn recording-active ${
+            isAppending ? "is-appending" : ""
+          }`}
           onClick={() => commands.toggleTranscription()}
-          title="Start / Stop Recording"
-          aria-label="Start / Stop Recording"
+          title={
+            isAppending
+              ? "Stop Voice Dictation (appending to card)"
+              : "Stop Recording"
+          }
+          aria-label="Stop Recording"
         >
           <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
+          <span className="sdot-active-badge">
+            {isAppending ? "APPEND" : "REC"}
+          </span>
         </button>
       </div>
+      {isAppending && (
+        <span
+          className="starget-badge"
+          title="Dictation will append to the card being edited"
+        >
+          ✏️ Appending
+        </span>
+      )}
       {waveform}
       <div className="sbase-r">
         {showTimer && <span className="stimer">{fmtTime(elapsed)}</span>}
         {showCancel && cancelBtn}
+      </div>
+    </div>
+  );
+
+  const idleRow = () => (
+    <div className="sbase idle-row">
+      <div className="sbase-l">
+        <button
+          className={`sdot-btn idle-btn ${isAppending ? "is-appending" : ""}`}
+          onClick={() => commands.toggleTranscription()}
+          title={
+            isAppending
+              ? "Start Voice Dictation (appending to card)"
+              : "Start Recording (or press shortcut)"
+          }
+          aria-label="Start Recording"
+        >
+          <span className="sdot idle" />
+          <span className="sdot-idle-badge">
+            {isAppending ? "APPEND" : "REC"}
+          </span>
+        </button>
+      </div>
+      <div
+        className="idle-center"
+        onClick={() => commands.toggleTranscription()}
+        title="Click or press shortcut to record"
+      >
+        {isAppending ? (
+          <span className="idle-append-label">
+            ✏️ Appending to Card · Click or shortcut
+          </span>
+        ) : (
+          <span className="idle-ready-label">
+            Ready · Click button or shortcut
+          </span>
+        )}
+      </div>
+      <div className="sbase-r">
+        {isAppending && (
+          <button
+            className="idle-exit-append-btn"
+            onClick={() => {
+              setEditingCardId(null);
+              setCaretPosition(null);
+            }}
+            title="Cancel append mode (next speech creates new card)"
+          >
+            ✕ New Card
+          </button>
+        )}
+        <button
+          className="sx"
+          aria-label="hide overlay"
+          onClick={() => {
+            setIsVisible(false);
+            try {
+              getCurrentWebviewWindow().hide();
+            } catch {
+              // ignore
+            }
+          }}
+          title="Hide overlay"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M4 4 L12 12 M12 4 L4 12"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
       </div>
     </div>
   );
@@ -407,7 +631,11 @@ const RecordingOverlay: React.FC = () => {
       <div className="sbase-l">
         <span className="sspinner" />
       </div>
-      <span className="swork-label">{label}</span>
+      <span className="swork-label">
+        {isAppending
+          ? t("cards.appendingToCard", "Appending to Card...")
+          : label}
+      </span>
       <div className="sbase-r">{showCancel && cancelBtn}</div>
     </div>
   );
@@ -427,48 +655,68 @@ const RecordingOverlay: React.FC = () => {
             <TranscriptionCardDeck
               cards={cards}
               selectedCardId={selectedCardId}
+              editingCardId={editingCardId}
               onSelectCard={(id) => setSelectedCardId(id)}
+              onStartEditing={(id) => setEditingCardId(id)}
+              onExitEditing={() => setEditingCardId(null)}
               onRemoveCard={handleRemoveCard}
               onClearAll={handleClearAll}
               onUpdateCardText={handleUpdateCardText}
               onAttachScreenshot={handleAttachScreenshot}
+              onUpdateCardImages={handleUpdateCardImages}
               onRemoveScreenshot={handleRemoveScreenshot}
+              onUpdateCaretPosition={(pos) => setCaretPosition(pos)}
+              caretPosition={caretPosition}
             />
           )}
-          {isRecordingActive && (
-            <div
-              key={session}
-              className={`scard ${open ? "open" : ""} ${collapsed ? "working" : ""} ${
-                isVisible ? "" : "leaving"
-              }`}
-            >
-              <div className="stext">
-                <div className="stext-clip">
-                  <div
-                    className={`stext-cap ${overflowing ? "overflowing" : ""}`}
-                    ref={capRef}
-                    onScroll={handleStreamScroll}
-                  >
-                    <p>
-                      <span className="committed">
-                        {streamText.committed ? streamText.committed + " " : ""}
-                      </span>
-                      <span className="tentative">{streamText.tentative}</span>
-                      {!working && <span className="scaret" />}
-                    </p>
+          <div
+            key={session}
+            className={`scard ${open ? "open" : ""} ${
+              collapsed ? "working" : ""
+            } ${
+              isRecordingActive ? "recording-active" : "idle-mode"
+            } ${isAppending ? "editing-mode" : ""} ${
+              isVisible ? "" : "leaving"
+            }`}
+          >
+            {isRecordingActive ? (
+              <>
+                <div className="stext">
+                  <div className="stext-clip">
+                    <div
+                      className={`stext-cap ${
+                        overflowing ? "overflowing" : ""
+                      }`}
+                      ref={capRef}
+                      onScroll={handleStreamScroll}
+                    >
+                      <p>
+                        <span className="committed">
+                          {streamText.committed
+                            ? streamText.committed + " "
+                            : ""}
+                        </span>
+                        <span className="tentative">
+                          {streamText.tentative}
+                        </span>
+                        {!working && <span className="scaret" />}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-              {working
-                ? workingRow(
-                    workKind === "polishing"
-                      ? t("overlay.processing")
-                      : t("overlay.transcribing"),
-                    true,
-                  )
-                : listeningRow(open, true)}
-            </div>
-          )}
+                {working
+                  ? workingRow(
+                      workKind === "polishing"
+                        ? t("overlay.processing")
+                        : t("overlay.transcribing"),
+                      true,
+                    )
+                  : listeningRow(open, true)}
+              </>
+            ) : (
+              idleRow()
+            )}
+          </div>
         </div>
       </div>
     );
@@ -493,21 +741,33 @@ const RecordingOverlay: React.FC = () => {
           <TranscriptionCardDeck
             cards={cards}
             selectedCardId={selectedCardId}
+            editingCardId={editingCardId}
             onSelectCard={(id) => setSelectedCardId(id)}
+            onStartEditing={(id) => setEditingCardId(id)}
+            onExitEditing={() => setEditingCardId(null)}
             onRemoveCard={handleRemoveCard}
             onClearAll={handleClearAll}
             onUpdateCardText={handleUpdateCardText}
             onAttachScreenshot={handleAttachScreenshot}
+            onUpdateCardImages={handleUpdateCardImages}
             onRemoveScreenshot={handleRemoveScreenshot}
+            onUpdateCaretPosition={(pos) => setCaretPosition(pos)}
+            caretPosition={caretPosition}
           />
         )}
-        {isRecordingActive && (
-          <div
-            className={`scard compact ${working && isVisible ? "cworking" : ""}`}
-          >
-            {working ? workingRow(workLabel, true) : listeningRow(false, true)}
-          </div>
-        )}
+        <div
+          className={`scard compact ${
+            isRecordingActive ? "recording-active" : "idle-mode"
+          } ${working && isVisible ? "cworking" : ""} ${
+            isAppending ? "editing-mode" : ""
+          }`}
+        >
+          {isRecordingActive
+            ? working
+              ? workingRow(workLabel, true)
+              : listeningRow(false, true)
+            : idleRow()}
+        </div>
       </div>
     </div>
   );

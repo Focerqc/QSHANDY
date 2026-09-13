@@ -110,9 +110,20 @@
   justify-content: center; /* horizontal centering, kept for both forms */
   align-items: flex-end; /* bottom placement: flush to the bottom edge */
   font-family: var(--s-font);
+  pointer-events: none;
 }
 .ov-stage.top {
   align-items: flex-start; /* top placement: flush to the top edge */
+}
+.ov-stage.bottom_left {
+  justify-content: flex-start;
+  align-items: flex-end;
+  padding-left: 0px;
+}
+.ov-stage.bottom_right {
+  justify-content: flex-end;
+  align-items: flex-end;
+  padding-right: 0px;
 }
 
 .ov-stack {
@@ -125,10 +136,64 @@
   pointer-events: auto;
 }
 
+.ov-stage.bottom_left .ov-stack {
+  align-items: flex-start;
+}
+
+.ov-stage.bottom_right .ov-stack {
+  align-items: flex-end;
+}
+
 .ov-stage.top .ov-stack {
   flex-direction: column-reverse;
   padding-top: 8px;
   padding-bottom: 0;
+}
+
+/* Editing mode styling for the recording card/pill */
+.scard.editing-mode {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.4) !important;
+}
+
+.scard.editing-mode .sdot-btn .sdot {
+  background: #f59e0b !important;
+  box-shadow: 0 0 8px #f59e0b !important;
+}
+
+.scard.editing-mode .starget-badge {
+  font-size: 11px;
+  color: #fbbf24;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+/* Active Recording Color Transformation: vibrant glowing border & illuminated pill */
+.scard.recording-active {
+  border-color: #ff2d87 !important;
+  box-shadow: 0 0 20px rgba(255, 45, 135, 0.45) !important;
+  background: linear-gradient(135deg, rgba(255, 45, 135, 0.16), rgba(15, 23, 42, 0.96)) !important;
+}
+
+.scard.recording-active.editing-mode {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.45) !important;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.16), rgba(15, 23, 42, 0.96)) !important;
+}
+
+/* Idle mode styling when overlay is shown waiting for record button or shortcut */
+.scard.idle-mode {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  background: rgba(15, 23, 42, 0.92) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35) !important;
+}
+
+.scard.idle-mode.editing-mode {
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.25) !important;
 }
 
 /* Compact pill: fade the whole container in/out (the pill itself never pops or
@@ -442,37 +507,37 @@
   }
 }
 .sx {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   flex: none;
   padding: 0;
-  border: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
   -webkit-appearance: none;
   appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--s-muted);
-  background: var(--s-hair);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   cursor: pointer;
-  transition:
-    background-color 150ms ease,
-    color 150ms ease,
-    transform 100ms ease;
+  transition: all 150ms ease;
 }
 .sx svg {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   display: block;
 }
 .sx:hover {
-  background: var(--s-accent-soft);
-  color: var(--color-text);
-  transform: scale(1.05);
+  background: #ef4444;
+  border-color: #f87171;
+  color: #ffffff;
+  transform: scale(1.15);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
 }
 .sx:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
 }
 
 /* working state (transcribing / polishing) — spinner + label */
@@ -500,3 +565,150 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ============================================================
+   Prominent Active Recording Button & Idle Row Controls
+   ============================================================ */
+
+.sdot-btn.recording-active {
+  background: #ff2d87 !important;
+  color: #ffffff !important;
+  padding: 3px 8px !important;
+  margin: 0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 0 14px rgba(255, 45, 135, 0.75) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  animation: rec-btn-pulse 1.8s infinite !important;
+}
+
+.sdot-btn.recording-active.is-appending {
+  background: #f59e0b !important;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.75) !important;
+}
+
+.sdot-btn.recording-active .sdot {
+  background: #ffffff !important;
+  box-shadow: 0 0 6px #ffffff !important;
+}
+
+@keyframes rec-btn-pulse {
+  0% {
+    box-shadow: 0 0 8px rgba(255, 45, 135, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(255, 45, 135, 0.95);
+  }
+  100% {
+    box-shadow: 0 0 8px rgba(255, 45, 135, 0.6);
+  }
+}
+
+.sdot-active-badge {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+}
+
+/* Idle Row Styles */
+.idle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 4px;
+  gap: 6px;
+}
+
+.sdot-btn.idle-btn {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  color: #ffffff !important;
+  padding: 3px 9px !important;
+  margin: 0 !important;
+  border-radius: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+  transition: all 180ms ease !important;
+}
+
+.sdot-btn.idle-btn:hover {
+  background: rgba(255, 45, 135, 0.35) !important;
+  border-color: #ff2d87 !important;
+  transform: scale(1.05) !important;
+  box-shadow: 0 0 12px rgba(255, 45, 135, 0.55) !important;
+}
+
+.sdot.idle {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff2d87;
+  box-shadow: 0 0 6px #ff2d87;
+  opacity: 1;
+}
+
+.sdot-btn.idle-btn.is-appending .sdot.idle {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+.sdot-idle-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+}
+
+.idle-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+
+.idle-ready-label {
+  font-size: 11.5px;
+  color: #ffffff;
+  opacity: 0.9;
+  font-weight: 500;
+  transition: opacity 150ms ease;
+}
+
+.idle-center:hover .idle-ready-label {
+  opacity: 1;
+}
+
+.idle-append-label {
+  font-size: 11px;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.idle-exit-append-btn {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 150ms ease;
+}
+
+.idle-exit-append-btn:hover {
+  background: rgba(245, 158, 11, 0.3);
+  border-color: #fbbf24;
+}
+

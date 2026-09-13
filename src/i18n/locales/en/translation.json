@@ -329,8 +329,10 @@
           "title": "Overlay Position",
           "description": "Where the overlay appears on screen during recording and transcription.",
           "options": {
-            "bottom": "Bottom",
-            "top": "Top"
+            "bottom_left": "Bottom Left",
+            "bottom": "Bottom (Center)",
+            "bottom_right": "Bottom Right",
+            "top": "Top (Center)"
           }
         }
       },
@@ -746,6 +748,16 @@
     "pasteHint": "(or press Ctrl+V while editing)",
     "pasteToApp": "Paste to App ({{shortcut}})",
     "pasting": "Pasting...",
-    "notesPlaceholder": "Click to edit text or type notes..."
+    "notesPlaceholder": "Click to edit text or type notes...",
+    "editingActive": "Editing: Voice will append to this card",
+    "exitEditing": "Exit Edit",
+    "draw": "Draw",
+    "drawSave": "Save Drawing",
+    "drawCancel": "Cancel",
+    "undo": "Undo",
+    "clearDraw": "Clear",
+    "appendingToCard": "Appending to Card...",
+    "addImage": "Add Image",
+    "multipleImages": "Images"
   }
 }

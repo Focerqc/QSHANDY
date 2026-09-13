@@ -6,7 +6,7 @@
   gap: 10px;
   width: 440px;
   max-width: 95vw;
-  max-height: 500px;
+  max-height: 310px;
   background: var(--s-surface);
   border: 1px solid var(--s-border);
   backdrop-filter: blur(24px);
@@ -21,6 +21,20 @@
   box-sizing: border-box;
   animation: deckSlideUp 220ms cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
+  opacity: 0.95;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+/* Dim to ~50% when mouse is over so user can see behind; restore to crisp ~95% when actively typing/focused/editing */
+.cards-deck-container:hover {
+  opacity: 0.50;
+}
+
+.cards-deck-container:focus-within,
+.cards-deck-container.is-editing,
+.cards-deck-container.is-drawing,
+.cards-deck-container:hover:focus-within {
+  opacity: 0.95;
 }
 
 .cards-deck-container.split-layout {
@@ -57,7 +71,7 @@
   gap: 6px;
   overflow-y: auto;
   flex: 1;
-  max-height: 440px;
+  max-height: 240px;
   padding-right: 4px;
 }
 
@@ -108,23 +122,82 @@
 }
 
 .sidebar-item-close {
-  background: transparent;
-  border: none;
-  color: var(--s-muted);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
   cursor: pointer;
-  padding: 1px;
-  border-radius: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.6;
+  opacity: 0.95;
   transition: all 120ms ease;
+  flex-shrink: 0;
 }
 
 .sidebar-item-close:hover {
   opacity: 1;
-  color: #ff5555;
-  background: rgba(255, 60, 60, 0.15);
+  color: #ffffff;
+  background: #ef4444;
+  border-color: #f87171;
+  transform: scale(1.15);
+}
+
+.card-close-btn {
+  background: rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  transition: all 150ms ease;
+  flex-shrink: 0;
+  opacity: 1 !important;
+}
+
+.card-close-btn:hover {
+  background: #ef4444 !important;
+  border-color: #f87171 !important;
+  color: #ffffff !important;
+  transform: scale(1.15);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.7) !important;
+}
+
+.card-append-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  border-radius: 9999px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.card-append-btn:hover {
+  background: rgba(245, 158, 11, 0.3);
+  border-color: #fbbf24;
+  transform: translateY(-1px);
+}
+
+.deck-sidebar-empty {
+  padding: 24px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--s-faint, rgba(255, 255, 255, 0.4));
+  font-style: italic;
+  line-height: 1.4;
 }
 
 .sidebar-item-text {
@@ -582,4 +655,274 @@
   background: #10b981;
   color: #fff;
   border-color: #10b981;
+}
+
+/* Card Editing Mode (Distinct from just Selected) */
+.deck-card.editing-active {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.4), 0 8px 24px rgba(245, 158, 11, 0.2) !important;
+}
+
+.deck-sidebar-item.editing-active {
+  border-color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.12) !important;
+  border-left-width: 4px !important;
+}
+
+.card-editing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 20px;
+  padding: 2px 8px;
+  animation: pulseAmber 2s infinite ease-in-out;
+}
+
+.card-exit-edit-btn {
+  background: transparent;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-exit-edit-btn:hover {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #f59e0b;
+}
+
+@keyframes pulseAmber {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 8px 2px rgba(245, 158, 11, 0.35);
+  }
+}
+
+/* Multiple Images Thumbnail Strip */
+.card-images-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 6px 0;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.card-image-thumb {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--s-hair);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+}
+
+.card-image-thumb:hover {
+  border-color: var(--s-accent);
+}
+
+.card-image-thumb.selected {
+  border: 2px solid var(--s-accent);
+  box-shadow: 0 0 8px rgba(255, 75, 139, 0.4);
+}
+
+.card-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-image-thumb-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.card-image-thumb:hover .card-image-thumb-delete {
+  opacity: 1;
+}
+
+.card-add-image-thumb-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  border: 1px dashed var(--s-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--s-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 9px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+}
+
+.card-add-image-thumb-btn:hover {
+  border-color: var(--s-accent);
+  color: var(--s-accent);
+  background: rgba(255, 75, 139, 0.1);
+}
+
+/* Drawing / Markup Tool */
+.card-draw-modal {
+  position: relative;
+  width: 100%;
+  background: rgba(14, 14, 18, 0.98);
+  border: 1px solid var(--s-border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  margin-top: 6px;
+}
+
+.card-draw-canvas-container {
+  position: relative;
+  width: 100%;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d0d10;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.card-draw-canvas {
+  touch-action: none;
+  cursor: crosshair;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+.card-draw-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.card-draw-colors {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.card-draw-color-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 120ms ease;
+}
+
+.card-draw-color-btn:hover {
+  transform: scale(1.15);
+}
+
+.card-draw-color-btn.selected {
+  transform: scale(1.25);
+  border-color: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+}
+
+.card-draw-sizes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.card-draw-size-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--s-hair);
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.card-draw-size-btn.selected {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: var(--s-accent);
+}
+
+.card-draw-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-draw-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--s-hair);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: #eee;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 120ms ease;
+}
+
+.card-draw-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.card-draw-btn.primary {
+  background: var(--s-accent);
+  border-color: var(--s-accent);
+  color: #fff;
+}
+
+.card-draw-btn.primary:hover {
+  filter: brightness(1.15);
 }

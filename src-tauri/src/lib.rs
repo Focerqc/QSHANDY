@@ -276,7 +276,21 @@ fn initialize_core_logic(app_handle: &AppHandle) {
                     }
                 );
                 if opens_window {
-                    show_main_window(tray.app_handle());
+                    let app_handle = tray.app_handle();
+                    let settings = settings::get_settings(app_handle);
+                    if settings.show_cards_deck {
+                        if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+                            if overlay_window.is_visible().unwrap_or(false) {
+                                let _ = overlay_window.hide();
+                            } else {
+                                crate::overlay::show_cards_overlay(app_handle);
+                            }
+                        } else {
+                            crate::overlay::show_cards_overlay(app_handle);
+                        }
+                    } else {
+                        show_main_window(app_handle);
+                    }
                 }
             });
     }

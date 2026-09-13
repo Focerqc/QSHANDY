@@ -108,15 +108,19 @@ pub struct PostProcessProvider {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
-#[serde(rename_all = "lowercase")]
 pub enum OverlayPosition {
+    #[serde(rename = "top")]
     Top,
     // `none` is retired: overlay visibility is owned by `OverlayStyle` now. The
     // alias keeps legacy stores (`"overlay_position": "none"`) deserializing
     // instead of failing the whole load; the one-time overlay migration reads the
     // raw stored string to recover the old "hidden" intent as `OverlayStyle::None`.
-    #[serde(alias = "none")]
+    #[serde(rename = "bottom", alias = "none")]
     Bottom,
+    #[serde(rename = "bottom_left", alias = "bottomleft")]
+    BottomLeft,
+    #[serde(rename = "bottom_right", alias = "bottomright")]
+    BottomRight,
 }
 
 /// Which recording overlay to display. `Minimal` and `Live` share one base
@@ -577,7 +581,7 @@ fn default_selected_language() -> String {
 fn default_overlay_position() -> OverlayPosition {
     // Position only matters when the overlay is shown; whether it shows at all is
     // `overlay_style` (Linux defaults that to None). So a single default suffices.
-    OverlayPosition::Bottom
+    OverlayPosition::BottomLeft
 }
 
 fn default_overlay_style() -> OverlayStyle {

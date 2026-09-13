@@ -18,6 +18,40 @@ pub fn cancel_operation(app: AppHandle) {
 
 #[tauri::command]
 #[specta::specta]
+pub fn toggle_transcription(app: AppHandle) {
+    crate::signal_handle::send_transcription_input(&app, "transcribe", "OverlayUI");
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn trigger_screenshot_hotkey(app: AppHandle) -> Result<(), String> {
+    let settings = get_settings(&app);
+    let shortcut_str = settings
+        .bindings
+        .get("trigger_screenshot_tool")
+        .map(|b| b.current_binding.clone())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "command+shift+4".to_string()
+            } else {
+                "ctrl+plus".to_string()
+            }
+        });
+
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        if let Some(state) = app.try_state::<crate::input::EnigoState>() {
+            if let Ok(mut enigo) = state.0.lock() {
+                let _ = crate::input::send_hotkey_combination(&mut enigo, &shortcut_str);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn is_portable() -> bool {
     crate::portable::is_portable()
 }

@@ -84,6 +84,10 @@ const settingUpdaters: {
 } = {
   always_on_microphone: (value) =>
     commands.updateMicrophoneMode(value as boolean),
+  auto_paste_transcription: (value) =>
+    commands.changeAutoPasteTranscriptionSetting(value as boolean),
+  show_cards_deck: (value) =>
+    commands.changeShowCardsDeckSetting(value as boolean),
   audio_feedback: (value) =>
     commands.changeAudioFeedbackSetting(value as boolean),
   audio_feedback_volume: (value) =>

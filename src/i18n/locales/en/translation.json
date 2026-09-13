@@ -179,6 +179,14 @@
           "transcribe_with_post_process": {
             "name": "Post-Processing Hotkey",
             "description": "Optional: A dedicated hotkey that always applies AI post-processing to your transcription."
+          },
+          "paste_selected_card": {
+            "name": "Paste Card Shortcut",
+            "description": "The global shortcut to paste the selected card's image and text prompt into your active application."
+          },
+          "trigger_screenshot_tool": {
+            "name": "Screenshot Tool Shortcut",
+            "description": "The hotkey triggered when clicking the camera button on cards (e.g. ShareX or Snipping Tool)."
           }
         },
         "errors": {
@@ -207,6 +215,14 @@
           "push_to_talk": "Records while you hold the shortcut",
           "toggle": "Tap the shortcut to start recording, tap again to stop"
         }
+      },
+      "autoPaste": {
+        "label": "Auto-Paste into Active Window",
+        "description": "When enabled, speech transcriptions are automatically pasted wherever your cursor is clicked. Disable if you only want transcriptions placed into the pop-up card deck."
+      },
+      "showCardsDeck": {
+        "label": "Show Pop-up Card Deck",
+        "description": "Displays persistent transcription cards for review, editing text and notes, attaching screenshots, and pasting prompts via Ctrl+B."
       }
     },
     "models": {
@@ -713,5 +729,23 @@
     "learnMore": "How to fix",
     "recorderBlocked": "Can't record shortcuts right now — macOS Secure Input is blocking key events. Resolve the Secure Input warning first.",
     "dismiss": "Dismiss"
+  },
+  "cards": {
+    "title": "Transcriptions",
+    "historyTitle": "Previous",
+    "imageBadge": "Image",
+    "card_one": "{{count}} card",
+    "card_other": "{{count}} cards",
+    "clear": "Clear",
+    "activeForPaste": "Active for {{shortcut}}",
+    "makeActive": "Make Active",
+    "replace": "Replace",
+    "pasteClipboardImage": "Paste Clipboard Image",
+    "browse": "Browse...",
+    "or": "or",
+    "pasteHint": "(or press Ctrl+V while editing)",
+    "pasteToApp": "Paste to App ({{shortcut}})",
+    "pasting": "Pasting...",
+    "notesPlaceholder": "Click to edit text or type notes..."
   }
 }

@@ -50,7 +50,7 @@ impl Drop for FinishGuard {
 // Shortcut Action Trait
 pub trait ShortcutAction: Send + Sync {
     fn start(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str);
-    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str);
+    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str, is_toggle: bool);
 }
 
 // Transcribe Action
@@ -629,7 +629,7 @@ impl ShortcutAction for TranscribeAction {
         );
     }
 
-    fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str) {
+    fn stop(&self, app: &AppHandle, binding_id: &str, _shortcut_str: &str, is_toggle: bool) {
         // Prevent a slow microphone from emitting a ready event or start chime
         // after the user has already requested stop.
         app.state::<Arc<AudioRecordingManager>>()
@@ -670,6 +670,7 @@ impl ShortcutAction for TranscribeAction {
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
         let post_process = self.post_process;
         let cancel_generation = rm.cancel_generation();
+        let is_toggle = is_toggle;
 
         tauri::async_runtime::spawn(async move {
             let _guard = FinishGuard(ah.clone());
@@ -822,17 +823,61 @@ impl ShortcutAction for TranscribeAction {
                                         return;
                                     }
 
-                                    match utils::paste(final_text, ah_clone.clone()) {
-                                        Ok(()) => debug!(
-                                            "Text pasted successfully in {:?}",
-                                            paste_time.elapsed()
-                                        ),
-                                        Err(e) => {
-                                            error!("Failed to paste transcription: {}", e);
-                                            let _ = ah_clone.emit("paste-error", ());
+                                    let settings = get_settings(&ah_clone);
+                                    let card_id = format!(
+                                        "card_{}",
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_millis()
+                                    );
+                                    let card_timestamp = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis();
+
+                                    // Auto-paste to active window if enabled
+                                    if settings.auto_paste_transcription {
+                                        match utils::paste(final_text.clone(), ah_clone.clone()) {
+                                            Ok(()) => debug!(
+                                                "Text pasted successfully in {:?}",
+                                                paste_time.elapsed()
+                                            ),
+                                            Err(e) => {
+                                                error!("Failed to paste transcription: {}", e);
+                                                let _ = ah_clone.emit("paste-error", ());
+                                            }
                                         }
                                     }
-                                    utils::hide_recording_overlay(&ah_clone);
+
+                                    // Always store the newest transcription in CardManager so it is immediately ready for Ctrl+B
+                                    if let Some(card_mgr) =
+                                        ah_clone.try_state::<Arc<crate::card_manager::CardManager>>()
+                                    {
+                                        card_mgr.set_active_card(crate::card_manager::ActiveCard {
+                                            id: card_id.clone(),
+                                            text: final_text.clone(),
+                                            image_data: None,
+                                        });
+                                    }
+
+                                    // Add card to deck and show cards overlay if enabled
+                                    if settings.show_cards_deck {
+                                        if let Some(mgr) = ah_clone.try_state::<std::sync::Arc<crate::card_manager::CardManager>>() {
+                                            mgr.set_card_count(mgr.card_count() + 1);
+                                        }
+                                        let _ = ah_clone.emit(
+                                            "add-transcription-card",
+                                            serde_json::json!({
+                                                "id": card_id,
+                                                "text": final_text,
+                                                "timestamp": card_timestamp
+                                            }),
+                                        );
+                                        crate::overlay::show_cards_overlay(&ah_clone);
+                                    } else {
+                                        utils::hide_recording_overlay(&ah_clone);
+                                    }
                                     set_tray_state(&ah_clone, TrayIconState::Idle);
                                 })
                                 .unwrap_or_else(|e| {
@@ -897,7 +942,7 @@ impl ShortcutAction for CancelAction {
         utils::cancel_current_operation(app);
     }
 
-    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str) {
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str, _is_toggle: bool) {
         // Nothing to do on stop for cancel
     }
 }
@@ -915,7 +960,7 @@ impl ShortcutAction for TestAction {
         );
     }
 
-    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str) {
+    fn stop(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str, _is_toggle: bool) {
         log::info!(
             "Shortcut ID '{}': Stopped - {} (App: {})", // Changed "Released" to "Stopped" for consistency
             binding_id,
@@ -923,6 +968,33 @@ impl ShortcutAction for TestAction {
             app.package_info().name
         );
     }
+}
+
+pub struct PasteSelectedCardAction;
+
+impl ShortcutAction for PasteSelectedCardAction {
+    fn start(&self, app: &AppHandle, binding_id: &str, shortcut_str: &str) {
+        log::info!(
+            "Shortcut ID '{}': Triggered paste selected card - {}",
+            binding_id,
+            shortcut_str
+        );
+        let ah = app.clone();
+        let card_mgr = app.try_state::<Arc<crate::card_manager::CardManager>>();
+        let active_card = card_mgr.and_then(|m| m.get_active_card());
+
+        if let Some(card) = active_card {
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(e) = crate::clipboard::paste_card(card, ah) {
+                    log::error!("Failed to paste active card: {}", e);
+                }
+            });
+        } else {
+            log::warn!("PasteSelectedCardAction: No active card to paste");
+        }
+    }
+
+    fn stop(&self, _app: &AppHandle, _binding_id: &str, _shortcut_str: &str, _is_toggle: bool) {}
 }
 
 // Static Action Map
@@ -941,6 +1013,10 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
     map.insert(
         "cancel".to_string(),
         Arc::new(CancelAction) as Arc<dyn ShortcutAction>,
+    );
+    map.insert(
+        "paste_selected_card".to_string(),
+        Arc::new(PasteSelectedCardAction) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "test".to_string(),

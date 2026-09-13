@@ -53,9 +53,26 @@ const OVERLAY_HEIGHT: f64 = 50.0;
 const OVERLAY_STREAM_WIDTH: f64 = 400.0;
 const OVERLAY_STREAM_HEIGHT: f64 = 120.0;
 
+const OVERLAY_CARDS_WIDTH: f64 = 660.0;
+const OVERLAY_CARDS_HEIGHT: f64 = 540.0;
+const OVERLAY_CARDS_RECORDING_HEIGHT: f64 = 590.0;
+
 /// Overlay window size (logical) for a given UI state.
-fn overlay_dimensions(state: &str) -> (f64, f64) {
-    if state == "streaming" {
+fn overlay_dimensions(app_handle: &AppHandle, state: &str) -> (f64, f64) {
+    let has_cards = crate::card_manager::has_active_cards(app_handle);
+    if has_cards {
+        if state == "streaming"
+            || state == "recording"
+            || state == "transcribing"
+            || state == "processing"
+        {
+            (OVERLAY_CARDS_WIDTH, OVERLAY_CARDS_RECORDING_HEIGHT)
+        } else {
+            (OVERLAY_CARDS_WIDTH, OVERLAY_CARDS_HEIGHT)
+        }
+    } else if state == "cards" {
+        (OVERLAY_CARDS_WIDTH, OVERLAY_CARDS_HEIGHT)
+    } else if state == "streaming" {
         (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT)
     } else {
         (OVERLAY_WIDTH, OVERLAY_HEIGHT)
@@ -509,7 +526,7 @@ fn show_overlay_state(app_handle: &AppHandle, state: &str) {
 
 fn show_overlay_state_on_main(app_handle: &AppHandle, state: &str) {
     // Size the overlay for this state (compact vs. streaming), then position it.
-    let (width, height) = overlay_dimensions(state);
+    let (width, height) = overlay_dimensions(app_handle, state);
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         // Invalidate any delayed hide still in flight from a previous session
         // (see `hide_recording_overlay`).
@@ -630,6 +647,48 @@ pub fn show_processing_overlay(app_handle: &AppHandle) {
     show_overlay_state(app_handle, "processing");
 }
 
+/// Shows the overlay sized for persistent transcription cards
+pub fn show_cards_overlay(app_handle: &AppHandle) {
+    if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+        let _ = overlay_window.set_focusable(true);
+    }
+    show_overlay_state(app_handle, "cards");
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn resize_overlay_for_cards_change(app_handle: AppHandle, count: usize) -> Result<(), String> {
+    if let Some(mgr) = app_handle.try_state::<std::sync::Arc<crate::card_manager::CardManager>>() {
+        mgr.set_card_count(count);
+    }
+    // If cards reached 0 while recording is active, resize back down to recording size
+    if count == 0 {
+        if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
+            let handle = app_handle.clone();
+            let _ = app_handle.run_on_main_thread(move || {
+                #[cfg(target_os = "windows")]
+                {
+                    let is_streaming = WINDOWS_OVERLAY_IS_STREAMING.load(Ordering::Relaxed);
+                    let state = if is_streaming { "streaming" } else { "recording" };
+                    let (w, h) = overlay_dimensions(&handle, state);
+                    let _ = place_windows_overlay(&handle, &overlay_window, w, h);
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let (w, h) = (OVERLAY_STREAM_WIDTH, OVERLAY_STREAM_HEIGHT);
+                    let _ = overlay_window
+                        .set_size(tauri::Size::Logical(tauri::LogicalSize { width: w, height: h }));
+                    if let Some((x, y)) = calculate_overlay_position(&handle, w, h) {
+                        let _ = overlay_window
+                            .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+                    }
+                }
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Updates the overlay window position based on current settings
 pub fn update_overlay_position(app_handle: &AppHandle) {
     // Positioning queries monitors/cursor (GDK/Xlib on Linux) and moves the
@@ -657,7 +716,7 @@ fn update_overlay_position_on_main(app_handle: &AppHandle) {
             } else {
                 "recording"
             };
-            let (width, height) = overlay_dimensions(state);
+            let (width, height) = overlay_dimensions(app_handle, state);
             if let Err(error) = place_windows_overlay(app_handle, &overlay_window, width, height) {
                 log::error!("Failed to update recording overlay position: {error}");
             }

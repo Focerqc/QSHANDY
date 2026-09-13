@@ -140,7 +140,6 @@ winreg = "0.55"
 [target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
 transcribe-cpp = { version = "0.2.0", default-features = false, features = [
   "dynamic-backends",
-  "vulkan",
 ] }
 
 [target.'cfg(all(windows, target_arch = "aarch64"))'.dependencies]

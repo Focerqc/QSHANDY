@@ -272,3 +272,66 @@ pub fn paste_text_direct(enigo: &mut Enigo, text: &str) -> Result<(), String> {
 
     Ok(())
 }
+
+/// Simulates pressing a custom hotkey combination (e.g. "ctrl+plus", "ctrl+shift+s", "printscreen").
+pub fn send_hotkey_combination(enigo: &mut Enigo, combination: &str) -> Result<(), String> {
+    let parts: Vec<&str> = combination
+        .split('+')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if parts.is_empty() {
+        return Ok(());
+    }
+
+    let mut modifier_keys: Vec<Key> = Vec::new();
+    let mut main_key: Option<Key> = None;
+
+    for part in parts {
+        let lower = part.to_lowercase();
+        match lower.as_str() {
+            "ctrl" | "control" => modifier_keys.push(Key::Control),
+            "alt" | "option" => modifier_keys.push(Key::Option),
+            "shift" => modifier_keys.push(Key::Shift),
+            "command" | "cmd" | "super" | "win" | "meta" => modifier_keys.push(Key::Meta),
+            "plus" | "=" => main_key = Some(Key::Other(0xBB)),
+            "minus" | "-" => main_key = Some(Key::Other(0xBD)),
+            "printscreen" | "prtscr" => main_key = Some(Key::Other(0x2C)),
+            s if s.len() == 1 => {
+                let c = s.chars().next().unwrap();
+                #[cfg(target_os = "windows")]
+                {
+                    if c >= 'a' && c <= 'z' {
+                        main_key = Some(Key::Other((c as u8 - b'a' + 0x41) as u32));
+                    } else if c >= '0' && c <= '9' {
+                        main_key = Some(Key::Other((c as u8 - b'0' + 0x30) as u32));
+                    } else {
+                        main_key = Some(Key::Unicode(c));
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    main_key = Some(Key::Unicode(c));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for m in &modifier_keys {
+        let _ = enigo.key(*m, enigo::Direction::Press);
+    }
+
+    if let Some(key) = main_key {
+        let _ = enigo.key(key, enigo::Direction::Click);
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    for m in modifier_keys.iter().rev() {
+        let _ = enigo.key(*m, enigo::Direction::Release);
+    }
+
+    Ok(())
+}

@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "./RecordingOverlay.css";
@@ -11,6 +12,7 @@ import type {
 } from "@/bindings";
 import i18n, { syncLanguageFromSettings } from "@/i18n";
 import { getLanguageDirection } from "@/lib/utils/rtl";
+import { TranscriptionCardDeck, CardItem } from "./TranscriptionCardDeck";
 
 type OverlayState = "recording" | "streaming" | "transcribing" | "processing";
 
@@ -21,6 +23,11 @@ const WAVE_BARS = 9;
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
+  const [isRecordingActive, setIsRecordingActive] = useState(false);
+  const [cards, setCards] = useState<CardItem[]>([]);
+  const cardsRef = useRef<CardItem[]>([]);
+  cardsRef.current = cards;
+
   const [state, setState] = useState<OverlayState>("recording");
   // `Stream::play()` returning does not mean hardware callbacks are flowing.
   // Stay visually in an arming state until the backend processes the first
@@ -52,13 +59,105 @@ const RecordingOverlay: React.FC = () => {
   const pinnedRef = useRef(true);
   const direction = getLanguageDirection(i18n.language);
 
+  const handleRemoveCard = (id: string) => {
+    setCards((prev) => {
+      const updated = prev.filter((c) => c.id !== id);
+      if (updated.length === 0 && !isRecordingActive) {
+        setIsVisible(false);
+        try {
+          getCurrentWebviewWindow().hide();
+        } catch {
+          // ignore
+        }
+      }
+      return updated;
+    });
+  };
+
+  const handleClearAll = () => {
+    setCards([]);
+    if (!isRecordingActive) {
+      setIsVisible(false);
+      try {
+        getCurrentWebviewWindow().hide();
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const handleUpdateCardText = (id: string, newText: string) => {
+    setCards((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, text: newText } : c)),
+    );
+  };
+
+  const handleAttachScreenshot = (id: string, dataUrl: string, blob: Blob) => {
+    setCards((prev) =>
+      prev.map((c) =>
+        c.id === id ? { ...c, screenshot: dataUrl, screenshotBlob: blob } : c,
+      ),
+    );
+  };
+
+  const handleRemoveScreenshot = (id: string) => {
+    setCards((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? { ...c, screenshot: undefined, screenshotBlob: undefined }
+          : c,
+      ),
+    );
+  };
+
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+
+  // Synchronize card count with backend to manage overlay window sizing
   useEffect(() => {
+    commands.resizeOverlayForCardsChange(cards.length).catch(() => {});
+  }, [cards.length]);
+
+  // Synchronize active card to backend so it's ready for Ctrl+B
+  useEffect(() => {
+    const activeCard =
+      cards.find((c) => c.id === selectedCardId) || cards[cards.length - 1];
+    if (!activeCard) {
+      commands.setActiveCardForPaste("", "", null).catch(() => {});
+      return;
+    }
+
+    const syncCard = async () => {
+      try {
+        let rawBytes: number[] | null = null;
+        if (activeCard.screenshotBlob) {
+          const buf = await activeCard.screenshotBlob.arrayBuffer();
+          rawBytes = Array.from(new Uint8Array(buf));
+        } else if (activeCard.screenshot) {
+          const res = await fetch(activeCard.screenshot);
+          const buf = await res.arrayBuffer();
+          rawBytes = Array.from(new Uint8Array(buf));
+        }
+        await commands.setActiveCardForPaste(
+          activeCard.id,
+          activeCard.text,
+          rawBytes,
+        );
+      } catch (err) {
+        console.warn("Failed to sync active card to backend:", err);
+      }
+    };
+
+    syncCard();
+  }, [cards, selectedCardId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const unlisteners: (() => void)[] = [];
+
     const setupEventListeners = async () => {
       const unlistenShow = await listen("show-overlay", async (event) => {
         const overlayState = event.payload as OverlayState;
-        // Reset synchronously before settings I/O. A fast microphone can emit
-        // recording-ready while the awaits below are in flight; resetting after
-        // them would overwrite that event and leave the overlay stuck arming.
+        setIsRecordingActive(true);
         if (overlayState === "recording" || overlayState === "streaming") {
           setCaptureReady(false);
           smoothedLevelsRef.current = Array(16).fill(0);
@@ -67,8 +166,6 @@ const RecordingOverlay: React.FC = () => {
         }
 
         await syncLanguageFromSettings();
-        // The Live panel flows downward from a top overlay and upward from a
-        // bottom one; read the placement so the layout can flip to match.
         try {
           const settings = await commands.getAppSettings();
           if (settings.status === "ok") {
@@ -77,32 +174,102 @@ const RecordingOverlay: React.FC = () => {
             );
           }
         } catch {
-          // Keep the previous/default placement if settings can't be read.
+          // Keep previous
         }
         setState(overlayState);
         if (overlayState === "streaming") {
           setPhase("listening");
           setWorkKind("transcribing");
           setElapsed(0);
-          setSession((s) => s + 1); // remount the card fresh for this session
+          setSession((s) => s + 1);
         }
         setIsVisible(true);
       });
+      if (!isMounted) {
+        unlistenShow();
+        return;
+      }
+      unlisteners.push(unlistenShow);
 
       const unlistenHide = await listen("hide-overlay", () => {
-        setIsVisible(false);
+        setIsRecordingActive(false);
+        if (cardsRef.current.length === 0) {
+          setIsVisible(false);
+        }
         setCaptureReady(false);
       });
+      if (!isMounted) {
+        unlistenHide();
+        return;
+      }
+      unlisteners.push(unlistenHide);
+
+      const unlistenAddCard = await listen<{
+        id?: string;
+        text: string;
+        timestamp?: number;
+      }>("add-transcription-card", (event) => {
+        const text = event.payload?.text;
+        if (!text || !text.trim()) return;
+        const id = event.payload?.id || crypto.randomUUID();
+        const timestamp = event.payload?.timestamp || Date.now();
+
+        setCards((prev) => {
+          // Deduplicate by ID
+          if (prev.some((c) => c.id === id)) return prev;
+          // Deduplicate if identical text within 800ms
+          const last = prev[prev.length - 1];
+          if (
+            last &&
+            last.text === text.trim() &&
+            Math.abs(last.timestamp - timestamp) < 800
+          ) {
+            return prev;
+          }
+          const newCard: CardItem = {
+            id,
+            text: text.trim(),
+            timestamp,
+          };
+          // Append new card at the bottom (oldest at top, newest at bottom)
+          return [...prev, newCard];
+        });
+        setSelectedCardId(id);
+        setIsVisible(true);
+      });
+      if (!isMounted) {
+        unlistenAddCard();
+        return;
+      }
+      unlisteners.push(unlistenAddCard);
+
+      const unlistenCardPasted = await listen<string>(
+        "card-pasted",
+        (event) => {
+          const cardId = event.payload;
+          if (cardId) {
+            handleRemoveCard(cardId);
+          }
+        },
+      );
+      if (!isMounted) {
+        unlistenCardPasted();
+        return;
+      }
+      unlisteners.push(unlistenCardPasted);
 
       const unlistenReady = await listen("recording-ready", () => {
         setElapsed(0);
         setCaptureReady(true);
       });
+      if (!isMounted) {
+        unlistenReady();
+        return;
+      }
+      unlisteners.push(unlistenReady);
 
       const unlistenLevel = await listen<number[]>("mic-level", (event) => {
         const newLevels = event.payload as number[];
-        // Exponential smoothing across the 16 buckets, then take the first N
-        // bars for the shared waveform.
         const smoothed = smoothedLevelsRef.current.map((prev, i) => {
           const target = newLevels[i] || 0;
           return prev * 0.7 + target * 0.3;
@@ -110,28 +277,39 @@ const RecordingOverlay: React.FC = () => {
         smoothedLevelsRef.current = smoothed;
         setLevels(smoothed.slice(0, WAVE_BARS));
       });
+      if (!isMounted) {
+        unlistenLevel();
+        return;
+      }
+      unlisteners.push(unlistenLevel);
 
       const unlistenStream = await events.streamTextEvent.listen((event) => {
         setStreamText(event.payload);
       });
+      if (!isMounted) {
+        unlistenStream();
+        return;
+      }
+      unlisteners.push(unlistenStream);
 
       const unlistenPhase = await events.streamPhaseEvent.listen((event) => {
         const payload: StreamPhaseEvent = event.payload;
         setPhase(payload.phase);
         if (payload.kind) setWorkKind(payload.kind);
       });
-
-      return () => {
-        unlistenShow();
-        unlistenHide();
-        unlistenReady();
-        unlistenLevel();
-        unlistenStream();
+      if (!isMounted) {
         unlistenPhase();
-      };
+        return;
+      }
+      unlisteners.push(unlistenPhase);
     };
 
     setupEventListeners();
+
+    return () => {
+      isMounted = false;
+      unlisteners.forEach((u) => u());
+    };
   }, []);
 
   // Elapsed capture timer starts only once microphone samples are flowing.
@@ -205,7 +383,14 @@ const RecordingOverlay: React.FC = () => {
   const listeningRow = (showTimer: boolean, showCancel: boolean) => (
     <div className="sbase">
       <div className="sbase-l">
-        <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
+        <button
+          className="sdot-btn"
+          onClick={() => commands.toggleTranscription()}
+          title="Start / Stop Recording"
+          aria-label="Start / Stop Recording"
+        >
+          <span className={`sdot ${captureReady ? "ready" : "arming"}`} />
+        </button>
       </div>
       {waveform}
       <div className="sbase-r">
@@ -232,48 +417,58 @@ const RecordingOverlay: React.FC = () => {
     const hasText =
       streamText.committed.length > 0 || streamText.tentative.length > 0;
     const working = phase === "working";
-    // Keep the panel open whenever there's text — even while finalizing — so the
-    // transcript stays put under a working spinner instead of collapsing and
-    // squishing the text mid-stream. Only fall back to the small working pill
-    // when there was no text to preserve.
     const open = hasText;
     const collapsed = working && !hasText;
 
     return (
       <div dir={direction} className={`ov-stage ${position}`}>
-        <div
-          key={session}
-          className={`scard ${open ? "open" : ""} ${collapsed ? "working" : ""} ${
-            isVisible ? "" : "leaving"
-          }`}
-        >
-          <div className="stext">
-            <div className="stext-clip">
-              <div
-                className={`stext-cap ${overflowing ? "overflowing" : ""}`}
-                ref={capRef}
-                onScroll={handleStreamScroll}
-              >
-                <p>
-                  <span className="committed">
-                    {streamText.committed ? streamText.committed + " " : ""}
-                  </span>
-                  <span className="tentative">{streamText.tentative}</span>
-                  {/* Drop the blinking caret once finalizing — it's no longer
-                      capturing, and a static spinner conveys the work. */}
-                  {!working && <span className="scaret" />}
-                </p>
+        <div className="ov-stack">
+          {cards.length > 0 && (
+            <TranscriptionCardDeck
+              cards={cards}
+              selectedCardId={selectedCardId}
+              onSelectCard={(id) => setSelectedCardId(id)}
+              onRemoveCard={handleRemoveCard}
+              onClearAll={handleClearAll}
+              onUpdateCardText={handleUpdateCardText}
+              onAttachScreenshot={handleAttachScreenshot}
+              onRemoveScreenshot={handleRemoveScreenshot}
+            />
+          )}
+          {isRecordingActive && (
+            <div
+              key={session}
+              className={`scard ${open ? "open" : ""} ${collapsed ? "working" : ""} ${
+                isVisible ? "" : "leaving"
+              }`}
+            >
+              <div className="stext">
+                <div className="stext-clip">
+                  <div
+                    className={`stext-cap ${overflowing ? "overflowing" : ""}`}
+                    ref={capRef}
+                    onScroll={handleStreamScroll}
+                  >
+                    <p>
+                      <span className="committed">
+                        {streamText.committed ? streamText.committed + " " : ""}
+                      </span>
+                      <span className="tentative">{streamText.tentative}</span>
+                      {!working && <span className="scaret" />}
+                    </p>
+                  </div>
+                </div>
               </div>
+              {working
+                ? workingRow(
+                    workKind === "polishing"
+                      ? t("overlay.processing")
+                      : t("overlay.transcribing"),
+                    true,
+                  )
+                : listeningRow(open, true)}
             </div>
-          </div>
-          {working
-            ? workingRow(
-                workKind === "polishing"
-                  ? t("overlay.processing")
-                  : t("overlay.transcribing"),
-                true,
-              )
-            : listeningRow(open, true)}
+          )}
         </div>
       </div>
     );
@@ -293,10 +488,26 @@ const RecordingOverlay: React.FC = () => {
       dir={direction}
       className={`ov-stage ${position} ov-fade ${isVisible ? "show" : ""}`}
     >
-      <div
-        className={`scard compact ${working && isVisible ? "cworking" : ""}`}
-      >
-        {working ? workingRow(workLabel, true) : listeningRow(false, true)}
+      <div className="ov-stack">
+        {cards.length > 0 && (
+          <TranscriptionCardDeck
+            cards={cards}
+            selectedCardId={selectedCardId}
+            onSelectCard={(id) => setSelectedCardId(id)}
+            onRemoveCard={handleRemoveCard}
+            onClearAll={handleClearAll}
+            onUpdateCardText={handleUpdateCardText}
+            onAttachScreenshot={handleAttachScreenshot}
+            onRemoveScreenshot={handleRemoveScreenshot}
+          />
+        )}
+        {isRecordingActive && (
+          <div
+            className={`scard compact ${working && isVisible ? "cworking" : ""}`}
+          >
+            {working ? workingRow(workLabel, true) : listeningRow(false, true)}
+          </div>
+        )}
       </div>
     </div>
   );

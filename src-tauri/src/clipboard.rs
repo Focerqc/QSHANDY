@@ -1,3 +1,4 @@
+use crate::card_manager::ActiveCard;
 use crate::input::{self, EnigoState};
 #[cfg(target_os = "linux")]
 use crate::settings::TypingTool;
@@ -8,7 +9,7 @@ use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::sync::OnceLock;
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[cfg(target_os = "linux")]
@@ -859,6 +860,64 @@ pub fn paste(text: String, app_handle: AppHandle) -> Result<(), String> {
     if settings.clipboard_handling == ClipboardHandling::CopyToClipboard {
         write_text_to_clipboard(&app_handle, &text)?;
     }
+
+    Ok(())
+}
+
+/// Pastes an ActiveCard's image (if present) and text prompt sequentially into the active window.
+pub fn paste_card(card: ActiveCard, app_handle: AppHandle) -> Result<(), String> {
+    let clipboard = app_handle.clipboard();
+    let settings = get_settings(&app_handle);
+
+    info!(
+        "Pasting card '{}' (has_image={}, text_len={})",
+        card.id,
+        card.image_data.is_some(),
+        card.text.len()
+    );
+
+    // 1. If card has an attached image, paste image first
+    if let Some(image_bytes) = card.image_data {
+        if !image_bytes.is_empty() {
+            match tauri::image::Image::from_bytes(&image_bytes) {
+                Ok(img) => {
+                    if let Err(e) = clipboard.write_image(&img) {
+                        log::error!("Failed to write card image to clipboard: {}", e);
+                    } else {
+                        // Brief pause to allow clipboard data registration
+                        std::thread::sleep(Duration::from_millis(settings.paste_delay_ms.max(100)));
+
+                        // Send paste key combo
+                        if let Err(e) = with_enigo(&app_handle, |enigo| {
+                            input::send_paste_ctrl_v(enigo, 100)
+                        }) {
+                            log::error!("Failed to send paste keystroke for image: {}", e);
+                        }
+
+                        // Wait 500ms for target app (e.g. ChatGPT, Claude, Discord) to register image attachment upload chip
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to decode card image bytes: {}", e);
+                }
+            }
+        }
+    }
+
+    // 2. If card has text, paste text
+    if !card.text.trim().is_empty() {
+        write_text_to_clipboard(&app_handle, &card.text)?;
+        std::thread::sleep(Duration::from_millis(settings.paste_delay_ms.max(80)));
+
+        if let Err(e) = with_enigo(&app_handle, |enigo| {
+            input::send_paste_ctrl_v(enigo, 100)
+        }) {
+            log::error!("Failed to send paste keystroke for text: {}", e);
+        }
+    }
+
+    let _ = app_handle.emit("card-pasted", &card.id);
 
     Ok(())
 }

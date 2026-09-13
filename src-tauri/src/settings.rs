@@ -439,6 +439,10 @@ pub struct AppSettings {
     pub paste_method: PasteMethod,
     #[serde(default)]
     pub clipboard_handling: ClipboardHandling,
+    #[serde(default = "default_auto_paste_transcription")]
+    pub auto_paste_transcription: bool,
+    #[serde(default = "default_show_cards_deck")]
+    pub show_cards_deck: bool,
     #[serde(default = "default_auto_submit")]
     pub auto_submit: bool,
     #[serde(default)]
@@ -518,6 +522,14 @@ pub struct AppSettings {
 
 fn default_model() -> String {
     "".to_string()
+}
+
+fn default_auto_paste_transcription() -> bool {
+    true
+}
+
+fn default_show_cards_deck() -> bool {
+    true
 }
 
 const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 2;
@@ -906,6 +918,37 @@ pub fn get_default_settings() -> AppSettings {
             current_binding: "escape".to_string(),
         },
     );
+    #[cfg(target_os = "macos")]
+    let default_paste_card_shortcut = "option+command+v";
+    #[cfg(not(target_os = "macos"))]
+    let default_paste_card_shortcut = "ctrl+alt+v";
+
+    bindings.insert(
+        "paste_selected_card".to_string(),
+        ShortcutBinding {
+            id: "paste_selected_card".to_string(),
+            name: "Paste Card with Image".to_string(),
+            description: "Pastes the active transcription card (with image prompt) into the focused app.".to_string(),
+            default_binding: default_paste_card_shortcut.to_string(),
+            current_binding: default_paste_card_shortcut.to_string(),
+        },
+    );
+
+    #[cfg(target_os = "macos")]
+    let default_screenshot_tool_shortcut = "command+shift+4";
+    #[cfg(not(target_os = "macos"))]
+    let default_screenshot_tool_shortcut = "ctrl+plus";
+
+    bindings.insert(
+        "trigger_screenshot_tool".to_string(),
+        ShortcutBinding {
+            id: "trigger_screenshot_tool".to_string(),
+            name: "Trigger Screenshot Tool".to_string(),
+            description: "Triggers external screenshot tool shortcut (e.g. ShareX or Snipping Tool).".to_string(),
+            default_binding: default_screenshot_tool_shortcut.to_string(),
+            current_binding: default_screenshot_tool_shortcut.to_string(),
+        },
+    );
 
     AppSettings {
         settings_schema_version: default_settings_schema_version(),
@@ -939,6 +982,8 @@ pub fn get_default_settings() -> AppSettings {
         recording_retention_period: default_recording_retention_period(),
         paste_method: PasteMethod::default(),
         clipboard_handling: ClipboardHandling::default(),
+        auto_paste_transcription: default_auto_paste_transcription(),
+        show_cards_deck: default_show_cards_deck(),
         auto_submit: default_auto_submit(),
         auto_submit_key: AutoSubmitKey::default(),
         post_process_enabled: default_post_process_enabled(),

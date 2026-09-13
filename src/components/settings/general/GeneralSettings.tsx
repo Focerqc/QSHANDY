@@ -11,6 +11,8 @@ import { AudioFeedback } from "../AudioFeedback";
 import { useSettings } from "../../../hooks/useSettings";
 import { VolumeSlider } from "../VolumeSlider";
 import { MuteWhileRecording } from "../MuteWhileRecording";
+import { AutoPasteToggle } from "../AutoPasteToggle";
+import { ShowCardsDeckToggle } from "../ShowCardsDeckToggle";
 import { ModelSettingsCard } from "./ModelSettingsCard";
 
 export const GeneralSettings: React.FC = () => {
@@ -22,6 +24,10 @@ export const GeneralSettings: React.FC = () => {
       <SettingsGroup title={t("settings.general.title")}>
         <ShortcutInput shortcutId="transcribe" grouped={true} />
         <ShortcutActivationSetting descriptionMode="tooltip" grouped={true} />
+        <AutoPasteToggle descriptionMode="tooltip" grouped={true} />
+        <ShowCardsDeckToggle descriptionMode="tooltip" grouped={true} />
+        <ShortcutInput shortcutId="paste_selected_card" grouped={true} />
+        <ShortcutInput shortcutId="trigger_screenshot_tool" grouped={true} />
         {/* Cancel shortcut remains hidden on Linux because of dynamic shortcut instability. */}
         {!isLinux && <ShortcutInput shortcutId="cancel" grouped={true} />}
       </SettingsGroup>

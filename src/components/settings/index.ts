@@ -34,3 +34,5 @@ export { RecordingRetentionPeriodSelector } from "./RecordingRetentionPeriod";
 export { AutostartToggle } from "./AutostartToggle";
 export { UpdateChecksToggle } from "./UpdateChecksToggle";
 export { ShowWhatsNewOnUpdate } from "./ShowWhatsNewOnUpdate";
+export { AutoPasteToggle } from "./AutoPasteToggle";
+export { ShowCardsDeckToggle } from "./ShowCardsDeckToggle";

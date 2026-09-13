@@ -164,6 +164,7 @@ enum Effect {
     Stop {
         binding_id: String,
         hotkey_string: String,
+        is_toggle: bool,
     },
 }
 
@@ -359,7 +360,11 @@ impl CoordinatorState {
                     // hold mode (the setting changed mid-recording) — otherwise
                     // nothing but Escape could stop it.
                     if self.is_locked() || input.mode == ShortcutActivation::Toggle {
-                        return Some(self.begin_processing(input.binding_id, input.hotkey_string));
+                        return Some(self.begin_processing(
+                            input.binding_id,
+                            input.hotkey_string,
+                            true,
+                        ));
                     }
                     // The key is still held (its release will end this
                     // recording), so a repeated press means nothing.
@@ -449,7 +454,7 @@ impl CoordinatorState {
             // stopping is the safe reading (it is what push-to-talk always did).
             .unwrap_or(Duration::MAX);
         if held >= threshold {
-            return Some(self.begin_processing(binding_id, hotkey_string));
+            return Some(self.begin_processing(binding_id, hotkey_string, false));
         }
         if let Some(hold) = &mut self.hold {
             debug!("Tap ({held:?}) for '{binding_id}': recording locked on until the next press");
@@ -515,12 +520,18 @@ impl CoordinatorState {
         }
     }
 
-    fn begin_processing(&mut self, binding_id: String, hotkey_string: String) -> Effect {
+    fn begin_processing(
+        &mut self,
+        binding_id: String,
+        hotkey_string: String,
+        is_toggle: bool,
+    ) -> Effect {
         self.stage = Stage::Processing;
         self.hold = None;
         Effect::Stop {
             binding_id,
             hotkey_string,
+            is_toggle,
         }
     }
 }
@@ -680,7 +691,8 @@ fn run_effect(app: &AppHandle, state: &mut CoordinatorState, effect: Effect) {
         Effect::Stop {
             binding_id,
             hotkey_string,
-        } => stop(app, &binding_id, &hotkey_string),
+            is_toggle,
+        } => stop(app, &binding_id, &hotkey_string, is_toggle),
     }
 }
 
@@ -701,12 +713,12 @@ fn start(app: &AppHandle, binding_id: &str, hotkey_string: &str) -> bool {
     recording
 }
 
-fn stop(app: &AppHandle, binding_id: &str, hotkey_string: &str) {
+fn stop(app: &AppHandle, binding_id: &str, hotkey_string: &str, is_toggle: bool) {
     let Some(action) = ACTION_MAP.get(binding_id) else {
         warn!("No action in ACTION_MAP for '{binding_id}'");
         return;
     };
-    action.stop(app, binding_id, hotkey_string);
+    action.stop(app, binding_id, hotkey_string, is_toggle);
 }
 
 #[cfg(test)]

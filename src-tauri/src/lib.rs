@@ -4,6 +4,7 @@ mod apple_intelligence;
 mod audio_feedback;
 pub mod audio_toolkit;
 mod autostart;
+pub mod card_manager;
 mod catalog;
 pub mod cli;
 mod clipboard;
@@ -217,6 +218,7 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(Arc::new(card_manager::CardManager::new()));
     app_handle.manage(tray::TrayState::new());
 
     // Note: Shortcuts are NOT initialized here.
@@ -653,6 +655,12 @@ pub fn run(cli_args: CliArgs) {
             shortcut::change_shortcut_activation_setting,
             shortcut::change_hold_threshold_ms_setting,
             shortcut::change_audio_feedback_setting,
+            shortcut::change_auto_paste_transcription_setting,
+            shortcut::change_show_cards_deck_setting,
+            card_manager::set_active_card_for_paste,
+            card_manager::trigger_paste_active_card,
+            card_manager::update_card_count,
+            overlay::resize_overlay_for_cards_change,
             shortcut::change_audio_feedback_volume_setting,
             shortcut::change_sound_theme_setting,
             shortcut::change_theme_setting,
@@ -713,6 +721,8 @@ pub fn run(cli_args: CliArgs) {
             trigger_update_check,
             show_main_window_command,
             commands::cancel_operation,
+            commands::toggle_transcription,
+            commands::trigger_screenshot_hotkey,
             commands::is_portable,
             commands::is_update_checks_locked,
             commands::get_app_dir_path,
@@ -942,7 +952,7 @@ pub fn run(cli_args: CliArgs) {
             // for portable mode (redirects WebView2 cache to portable Data dir)
             let mut win_builder =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
-                    .title("Handy")
+                    .title("QSHANDY")
                     .inner_size(680.0, 570.0)
                     .min_inner_size(680.0, 570.0)
                     .resizable(true)

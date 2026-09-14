@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dropdown } from "../ui/Dropdown";
+import { Slider } from "../ui/Slider";
 import { SettingContainer } from "../ui/SettingContainer";
 import { useSettings } from "../../hooks/useSettings";
 import type { OverlayPosition, OverlayStyle } from "@/bindings";
@@ -57,6 +58,16 @@ export const ShowOverlay: React.FC<ShowOverlayProps> = React.memo(
         ? (rawPos as OverlayPosition)
         : "bottom_left";
 
+    const [deckOpacity, setDeckOpacity] = useState<number>(() => {
+      const saved = localStorage.getItem("qshandy_deck_opacity");
+      return saved ? Math.round(parseFloat(saved) * 100) : 95;
+    });
+
+    const handleOpacityChange = (val: number) => {
+      setDeckOpacity(val);
+      localStorage.setItem("qshandy_deck_opacity", String(val / 100));
+    };
+
     return (
       <>
         <SettingContainer
@@ -91,6 +102,27 @@ export const ShowOverlay: React.FC<ShowOverlayProps> = React.memo(
               disabled={isUpdating("overlay_position")}
             />
           </SettingContainer>
+        )}
+
+        {selectedStyle !== "none" && (
+          <Slider
+            label={t(
+              "settings.advanced.overlay.opacity.title",
+              "Overlay Transparency",
+            )}
+            description={t(
+              "settings.advanced.overlay.opacity.description",
+              "Adjust transparency amount of the overlay and transcription cards",
+            )}
+            descriptionMode={descriptionMode}
+            grouped={grouped}
+            value={deckOpacity}
+            onChange={handleOpacityChange}
+            min={30}
+            max={100}
+            step={5}
+            formatValue={(v) => `${Math.round(v)}%`}
+          />
         )}
       </>
     );

@@ -68,6 +68,7 @@ interface TranscriptionCardDeckProps {
   onRemoveScreenshot: (id: string) => void;
   onUpdateCaretPosition?: (pos: number) => void;
   caretPosition?: number | null;
+  pendingClearCardIds?: Set<string>;
 }
 
 const DRAW_COLORS = [
@@ -94,6 +95,7 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
   onRemoveScreenshot,
   onUpdateCaretPosition,
   caretPosition,
+  pendingClearCardIds,
 }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
@@ -116,6 +118,25 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
   const [activeCardForFile, setActiveCardForFile] = useState<string | null>(
     null,
   );
+
+  // Deck Opacity Slider State
+  const [deckOpacity, setDeckOpacity] = useState<number>(() => {
+    const saved = localStorage.getItem("qshandy_deck_opacity");
+    return saved ? Math.max(0.3, Math.min(1.0, parseFloat(saved))) : 0.95;
+  });
+  const [showOpacitySlider, setShowOpacitySlider] = useState<boolean>(false);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--deck-opacity",
+      String(deckOpacity),
+    );
+    document.documentElement.style.setProperty(
+      "--deck-focus-opacity",
+      String(Math.min(1.0, deckOpacity + 0.05)),
+    );
+    localStorage.setItem("qshandy_deck_opacity", String(deckOpacity));
+  }, [deckOpacity]);
 
   const activeCard =
     cards.find((c) => c.id === selectedCardId) || cards[cards.length - 1];
@@ -141,7 +162,7 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
   const baseImageRef = useRef<HTMLImageElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Restore caret position in textarea after speech-to-text insertion
+  // Restore caret position in textarea safely without triggering focus feedback loops
   useEffect(() => {
     if (
       caretPosition !== null &&
@@ -150,19 +171,30 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
       isCurrentCardEditing
     ) {
       try {
-        textareaRef.current.focus();
         textareaRef.current.setSelectionRange(caretPosition, caretPosition);
       } catch {
         // ignore
       }
     }
-  }, [caretPosition, activeCard?.text]);
+  }, [caretPosition, activeCard?.text, isCurrentCardEditing]);
 
   const handleCaretUpdate = (
     e: React.SyntheticEvent<HTMLTextAreaElement>,
   ) => {
-    if (onUpdateCaretPosition) {
-      onUpdateCaretPosition(e.currentTarget.selectionStart);
+    const target = e.currentTarget;
+    const pos = target.selectionStart;
+    // Don't overwrite an existing non-zero caret position if a programmatic focus fires selectionStart 0
+    if (
+      e.type === "focus" &&
+      pos === 0 &&
+      caretPosition !== null &&
+      caretPosition !== undefined &&
+      caretPosition > 0
+    ) {
+      return;
+    }
+    if (onUpdateCaretPosition && pos !== null && pos !== undefined) {
+      onUpdateCaretPosition(pos);
     }
   };
 
@@ -198,6 +230,32 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
 
   const activeImages = getCardImages(activeCard);
   const displayedImage = activeImages[activeImageIndex] || activeImages[0];
+
+  const activeCardRef = useRef<HTMLDivElement>(null);
+  const prevImageCountRef = useRef<number>(activeImages.length);
+
+  // Auto-scroll active card down to reveal newly attached image or drawing tool
+  useEffect(() => {
+    if (
+      activeImages.length > prevImageCountRef.current &&
+      activeCardRef.current
+    ) {
+      activeCardRef.current.scrollTo({
+        top: activeCardRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+    prevImageCountRef.current = activeImages.length;
+  }, [activeImages.length]);
+
+  useEffect(() => {
+    if (isDrawingMode && activeCardRef.current) {
+      activeCardRef.current.scrollTo({
+        top: activeCardRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [isDrawingMode]);
 
   // Trigger file picker for specific card
   const triggerFilePicker = (cardId: string) => {
@@ -485,14 +543,46 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
             </span>
             <span className="deck-badge">{previousCards.length}</span>
           </div>
-          <button
-            className="deck-btn-ghost"
-            onClick={onClearAll}
-            title={t("cards.clear", "Clear all")}
-          >
-            <Trash2 size={12} />
-            <span>{t("cards.clear", "Clear")}</span>
-          </button>
+          <div className="deck-sidebar-actions">
+            <div className="deck-opacity-control">
+              <button
+                className={`deck-opacity-btn ${showOpacitySlider ? "active" : ""}`}
+                onClick={() => setShowOpacitySlider((prev) => !prev)}
+                title="Adjust deck transparency"
+              >
+                <span>{Math.round(deckOpacity * 100)}%</span>
+              </button>
+              {showOpacitySlider && (
+                <div
+                  className="deck-opacity-slider-popover"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="deck-opacity-slider-label">
+                    <span>Opacity</span>
+                    <span>{Math.round(deckOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="30"
+                    max="100"
+                    step="5"
+                    value={Math.round(deckOpacity * 100)}
+                    onChange={(e) =>
+                      setDeckOpacity(Number(e.target.value) / 100)
+                    }
+                  />
+                </div>
+              )}
+            </div>
+            <button
+              className="deck-btn-ghost"
+              onClick={onClearAll}
+              title={t("cards.clear", "Clear all")}
+            >
+              <Trash2 size={12} />
+              <span>{t("cards.clear", "Clear")}</span>
+            </button>
+          </div>
         </div>
 
         <div className="deck-sidebar-list" ref={listRef}>
@@ -505,6 +595,7 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
           ) : (
             previousCards.map((card) => {
               const isEditing = editingCardId === card.id;
+              const isPendingClear = pendingClearCardIds?.has(card.id);
               const cardImgs = getCardImages(card);
 
               return (
@@ -512,7 +603,7 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
                   key={card.id}
                   className={`deck-sidebar-item ${
                     isEditing ? "editing-active" : ""
-                  }`}
+                  } ${isPendingClear ? "pending-clear" : ""}`}
                   onClick={() => {
                     onSelectCard(card.id);
                     if (onExitEditing) onExitEditing();
@@ -524,6 +615,14 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
                       {formatTime(card.timestamp)}
                     </span>
                     <div className="sidebar-item-actions">
+                      {isPendingClear && (
+                        <span
+                          className="deck-pending-badge"
+                          title="Sent via Ctrl+B · Clears when popup is closed"
+                        >
+                          ✓ Sent
+                        </span>
+                      )}
                       {isEditing && (
                         <span
                           className="card-editing-pill"
@@ -569,9 +668,10 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
       {/* Main Center Active Card Editor */}
       <div className="deck-main-card">
         <div
+          ref={activeCardRef}
           className={`deck-card selected-active ${
             isCurrentCardEditing ? "editing-active" : ""
-          }`}
+          } ${pendingClearCardIds?.has(activeCard.id) ? "pending-clear" : ""}`}
           onPaste={(e) => handleCardPaste(activeCard.id, e)}
         >
           <div className="card-top">
@@ -579,6 +679,15 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
               <span className="card-time">
                 {formatTime(activeCard.timestamp)}
               </span>
+
+              {pendingClearCardIds?.has(activeCard.id) && (
+                <span
+                  className="deck-pending-badge"
+                  title="Sent via Ctrl+B · Clears when popup is closed"
+                >
+                  ✓ Sent (Clears on close)
+                </span>
+              )}
 
               {isCurrentCardEditing ? (
                 <div
@@ -624,11 +733,21 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
                       onClick={(e) => {
                         e.stopPropagation();
                         onStartEditing(activeCard.id);
+                        const curLen = activeCard.text.length;
+                        const targetPos =
+                          caretPosition !== null &&
+                          caretPosition !== undefined &&
+                          caretPosition >= 0 &&
+                          caretPosition <= curLen
+                            ? caretPosition
+                            : curLen;
+                        onUpdateCaretPosition?.(targetPos);
                         if (textareaRef.current) {
                           textareaRef.current.focus();
-                          const len = textareaRef.current.value.length;
-                          textareaRef.current.setSelectionRange(len, len);
-                          onUpdateCaretPosition?.(len);
+                          textareaRef.current.setSelectionRange(
+                            targetPos,
+                            targetPos,
+                          );
                         }
                       }}
                       title="Dictate voice speech directly into this card"
@@ -672,6 +791,7 @@ export const TranscriptionCardDeck: React.FC<TranscriptionCardDeckProps> = ({
                 onSelectCard(activeCard.id);
                 handleCaretUpdate(e);
               }}
+              onBlur={handleCaretUpdate}
               onSelect={handleCaretUpdate}
               onKeyUp={handleCaretUpdate}
               onChange={(e) => {

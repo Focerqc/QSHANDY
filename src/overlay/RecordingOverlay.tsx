@@ -71,11 +71,47 @@ const RecordingOverlay: React.FC = () => {
   const caretPositionRef = useRef<number | null>(null);
   caretPositionRef.current = caretPosition;
 
+  // Pending clear cards (pasted via Ctrl+B, held with blue border until popup close)
+  const [pendingClearCardIds, setPendingClearCardIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const pendingClearCardIdsRef = useRef<Set<string>>(new Set());
+  pendingClearCardIdsRef.current = pendingClearCardIds;
+
+  // Streaming dictation text & position refs
+  const streamBaseTextRef = useRef<string | null>(null);
+  const streamInsertionPosRef = useRef<number | null>(null);
+
+  const purgePendingClearCards = () => {
+    if (pendingClearCardIdsRef.current.size === 0) return;
+    setCards((prev) => {
+      const remaining = prev.filter(
+        (c) => !pendingClearCardIdsRef.current.has(c.id),
+      );
+      if (remaining.length === 0 && !isRecordingActive) {
+        setIsVisible(false);
+        try {
+          getCurrentWebviewWindow().hide();
+        } catch {
+          // ignore
+        }
+      }
+      return remaining;
+    });
+    setPendingClearCardIds(new Set());
+  };
+
   const handleRemoveCard = (id: string) => {
     if (editingCardId === id) {
       setEditingCardId(null);
       setCaretPosition(null);
     }
+    setPendingClearCardIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     setCards((prev) => {
       const updated = prev.filter((c) => c.id !== id);
       if (updated.length === 0 && !isRecordingActive) {
@@ -93,6 +129,7 @@ const RecordingOverlay: React.FC = () => {
   const handleClearAll = () => {
     setEditingCardId(null);
     setCaretPosition(null);
+    setPendingClearCardIds(new Set());
     setCards([]);
     if (!isRecordingActive) {
       setIsVisible(false);
@@ -276,6 +313,16 @@ const RecordingOverlay: React.FC = () => {
 
       const unlistenHide = await listen("hide-overlay", () => {
         setIsRecordingActive(false);
+        if (streamBaseTextRef.current !== null && editingCardIdRef.current) {
+          const orig = streamBaseTextRef.current;
+          const editId = editingCardIdRef.current;
+          setCards((prev) =>
+            prev.map((c) => (c.id === editId ? { ...c, text: orig } : c)),
+          );
+          streamBaseTextRef.current = null;
+          streamInsertionPosRef.current = null;
+        }
+        purgePendingClearCards();
         if (cardsRef.current.length === 0) {
           setIsVisible(false);
         }
@@ -303,44 +350,45 @@ const RecordingOverlay: React.FC = () => {
           currentEditingId &&
           cardsRef.current.some((c) => c.id === currentEditingId)
         ) {
-          let nextCaret = 0;
+          const base =
+            streamBaseTextRef.current !== null
+              ? streamBaseTextRef.current
+              : (cardsRef.current.find((c) => c.id === currentEditingId)?.text || "");
+          const curPos =
+            streamInsertionPosRef.current !== null
+              ? streamInsertionPosRef.current
+              : caretPositionRef.current;
+          const pos =
+            curPos !== null && curPos >= 0 && curPos <= base.length
+              ? curPos
+              : base.length;
+
+          const trimmed = text.trim();
+          const charBefore = pos > 0 ? base[pos - 1] : "";
+          const charAfter = pos < base.length ? base[pos] : "";
+
+          const needLeadingSpace =
+            charBefore && !/\s/.test(charBefore);
+          const needTrailingSpace =
+            charAfter && !/\s/.test(charAfter);
+
+          const insertion = `${needLeadingSpace ? " " : ""}${trimmed}${needTrailingSpace ? " " : ""}`;
+          const newText =
+            base.slice(0, pos) + insertion + base.slice(pos);
+          const nextCaret = pos + insertion.length;
+
+          streamBaseTextRef.current = null;
+          streamInsertionPosRef.current = null;
+
           setCards((prev) =>
-            prev.map((c) => {
-              if (c.id === currentEditingId) {
-                const trimmed = text.trim();
-                const pos = caretPositionRef.current;
-
-                if (pos !== null && pos >= 0 && pos <= c.text.length) {
-                  // Determine smart spacing before and after the insertion point
-                  const charBefore = pos > 0 ? c.text[pos - 1] : "";
-                  const charAfter = pos < c.text.length ? c.text[pos] : "";
-
-                  const needLeadingSpace =
-                    charBefore && !/\s/.test(charBefore);
-                  const needTrailingSpace =
-                    charAfter && !/\s/.test(charAfter);
-
-                  const insertion = `${needLeadingSpace ? " " : ""}${trimmed}${needTrailingSpace ? " " : ""}`;
-                  const newText =
-                    c.text.slice(0, pos) + insertion + c.text.slice(pos);
-
-                  nextCaret = pos + insertion.length;
-                  return { ...c, text: newText, timestamp: Date.now() };
-                } else {
-                  // Fallback: append to end
-                  const newText = c.text.trim()
-                    ? `${c.text.trim()} ${trimmed}`
-                    : trimmed;
-                  nextCaret = newText.length;
-                  return { ...c, text: newText, timestamp: Date.now() };
-                }
-              }
-              return c;
-            }),
+            prev.map((c) =>
+              c.id === currentEditingId
+                ? { ...c, text: newText, timestamp: Date.now() }
+                : c,
+            ),
           );
           setCaretPosition(nextCaret);
           setSelectedCardId(currentEditingId);
-          setEditingCardId(null);
           setIsVisible(true);
           return;
         }
@@ -379,7 +427,21 @@ const RecordingOverlay: React.FC = () => {
         (event) => {
           const cardId = event.payload;
           if (cardId) {
-            handleRemoveCard(cardId);
+            setPendingClearCardIds((prev) => {
+              const next = new Set(prev);
+              next.add(cardId);
+              return next;
+            });
+            setSelectedCardId((current) => {
+              if (current === cardId) {
+                const other = cardsRef.current.find(
+                  (c) =>
+                    c.id !== cardId && !pendingClearCardIdsRef.current.has(c.id),
+                );
+                return other ? other.id : current;
+              }
+              return current;
+            });
           }
         },
       );
@@ -416,6 +478,50 @@ const RecordingOverlay: React.FC = () => {
 
       const unlistenStream = await events.streamTextEvent.listen((event) => {
         setStreamText(event.payload);
+
+        // If editing a card, stream spoken words directly into it!
+        const currentEditingId = editingCardIdRef.current;
+        if (currentEditingId) {
+          const targetCard = cardsRef.current.find(
+            (c) => c.id === currentEditingId,
+          );
+          if (targetCard) {
+            if (streamBaseTextRef.current === null) {
+              streamBaseTextRef.current = targetCard.text;
+              const curPos = caretPositionRef.current;
+              const validPos =
+                curPos !== null &&
+                curPos >= 0 &&
+                curPos <= targetCard.text.length
+                  ? curPos
+                  : targetCard.text.length;
+              streamInsertionPosRef.current = validPos;
+            }
+
+            const base = streamBaseTextRef.current;
+            const pos = streamInsertionPosRef.current ?? base.length;
+            const liveWords = [event.payload.committed, event.payload.tentative]
+              .filter(Boolean)
+              .join(" ")
+              .trim();
+
+            if (liveWords) {
+              const charBefore = pos > 0 ? base[pos - 1] : "";
+              const charAfter = pos < base.length ? base[pos] : "";
+              const needLeadingSpace = charBefore && !/\s/.test(charBefore);
+              const needTrailingSpace = charAfter && !/\s/.test(charAfter);
+              const insertion = `${needLeadingSpace ? " " : ""}${liveWords}${needTrailingSpace ? " " : ""}`;
+              const composite =
+                base.slice(0, pos) + insertion + base.slice(pos);
+
+              setCards((prev) =>
+                prev.map((c) =>
+                  c.id === currentEditingId ? { ...c, text: composite } : c,
+                ),
+              );
+            }
+          }
+        }
       });
       if (!isMounted) {
         unlistenStream();
@@ -496,7 +602,18 @@ const RecordingOverlay: React.FC = () => {
     <button
       className="sx"
       aria-label="cancel"
-      onClick={() => commands.cancelOperation()}
+      onClick={() => {
+        if (streamBaseTextRef.current !== null && editingCardIdRef.current) {
+          const orig = streamBaseTextRef.current;
+          const editId = editingCardIdRef.current;
+          setCards((prev) =>
+            prev.map((c) => (c.id === editId ? { ...c, text: orig } : c)),
+          );
+          streamBaseTextRef.current = null;
+          streamInsertionPosRef.current = null;
+        }
+        commands.cancelOperation();
+      }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path
@@ -602,6 +719,7 @@ const RecordingOverlay: React.FC = () => {
           className="sx"
           aria-label="hide overlay"
           onClick={() => {
+            purgePendingClearCards();
             setIsVisible(false);
             try {
               getCurrentWebviewWindow().hide();
@@ -656,6 +774,7 @@ const RecordingOverlay: React.FC = () => {
               cards={cards}
               selectedCardId={selectedCardId}
               editingCardId={editingCardId}
+              pendingClearCardIds={pendingClearCardIds}
               onSelectCard={(id) => setSelectedCardId(id)}
               onStartEditing={(id) => setEditingCardId(id)}
               onExitEditing={() => setEditingCardId(null)}
@@ -742,6 +861,7 @@ const RecordingOverlay: React.FC = () => {
             cards={cards}
             selectedCardId={selectedCardId}
             editingCardId={editingCardId}
+            pendingClearCardIds={pendingClearCardIds}
             onSelectCard={(id) => setSelectedCardId(id)}
             onStartEditing={(id) => setEditingCardId(id)}
             onExitEditing={() => setEditingCardId(null)}

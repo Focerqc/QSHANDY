@@ -18,6 +18,18 @@ applyTheme(getStoredTheme());
 syncThemeFromSettings();
 listen<Theme>("theme-changed", (event) => applyTheme(event.payload));
 
+const storedOpacity = localStorage.getItem("qshandy_deck_opacity");
+if (storedOpacity) {
+  document.documentElement.style.setProperty("--deck-opacity", storedOpacity);
+  const num = parseFloat(storedOpacity);
+  if (!isNaN(num)) {
+    document.documentElement.style.setProperty(
+      "--deck-focus-opacity",
+      String(Math.min(1.0, num + 0.05)),
+    );
+  }
+}
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <RecordingOverlay />
